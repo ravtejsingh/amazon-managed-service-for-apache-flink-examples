@@ -13,5 +13,12 @@
       "keystore.secret": "<KeystorePassSecret>",
       "keystore.secret.field": "<KeystorePassSecretField>"
     }
+  },
+  {
+    "PropertyGroupId": "Output0",
+    "PropertyMap": {
+      "bootstrap.servers": "<BootstrapServers>",
+      "topic": "<Topic>"
+    }
   }
 ]
