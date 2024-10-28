@@ -22,9 +22,9 @@ Also add a self-reference inbound rule to the Security Group for port 9094, that
 
 ### 2. Setup client bastion
 
-We can use the AWS Cloud9 environment and `KafkaClientEC2Instance` setup as described in the [MSK Labs Workshop](https://catalog.workshops.aws/msk-labs/en-US/overview/setup) for testing.
+We can setup the Kafka client EC2 instance using the steps described in the [MSK Labs Workshop](https://catalog.workshops.aws/msk-labs/en-US/overview/prerequisites) for testing.
 
-SSH into `KafkaClientEC2Instance` from Cloud9 terminal.
+Connect to the Kafka client EC2 instance via SSM.
 
 Export the brokers and zookeeper connection strings for the Amazon MSK cluster-
 ```
