@@ -9,6 +9,7 @@ import org.apache.flink.streaming.api.environment.LocalStreamEnvironment;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import static org.apache.flink.table.api.Expressions.$;
 import org.apache.flink.table.api.Table;
+import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,8 +30,6 @@ public class StreamingJob {
     private static final String S3_BUCKET_REGION_KEY = "bucket.region";
     private static final String KEYSTORE_S3_BUCKET_KEY = "keystore.bucket";
     private static final String KEYSTORE_S3_PATH_KEY = "keystore.path";
-    //private static final String TRUSTSTORE_S3_BUCKET_KEY = "truststore.bucket";
-    //private static final String TRUSTSTORE_S3_PATH_KEY = "truststore.path";
     private static final String KEYSTORE_PASS_SECRET_KEY = "keystore.secret";
     private static final String KEYSTORE_PASS_SECRET_FIELD_KEY = "keystore.secret.field";
 
@@ -58,7 +57,7 @@ public class StreamingJob {
     }
 
     public static void main(String[] args) throws Exception {
-        // Set up the streaming execution environment
+        // Set up the stream table environment
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
 
@@ -73,7 +72,7 @@ public class StreamingJob {
             "CREATE TABLE sourceTable (" +
             "  `user` STRING, " +
             "  `message` STRING, " +
-            "  `ts` TIMESTAMP(3)" +
+            "  `ts` TIMESTAMP(3) " +
             ") WITH (" +
             "  'connector' = 'kafka'," +
             "  'topic' = '" + inputProperties.getProperty(KAFKA_SOURCE_TOPIC_KEY, DEFAULT_SOURCE_TOPIC) + "'," +
@@ -84,17 +83,15 @@ public class StreamingJob {
             "  'properties.config.providers.secretsmanager.class' = 'com.amazonaws.kafka.config.providers.SecretsManagerConfigProvider'," +
             "  'properties.config.providers.s3import.class' = 'com.amazonaws.kafka.config.providers.S3ImportConfigProvider'," +
             "  'properties.config.providers.s3import.param.region' = '" + inputProperties.getProperty(S3_BUCKET_REGION_KEY) + "'," +
-        //  "  'properties.ssl.truststore.location' = '${s3import:" + inputProperties.getProperty(S3_BUCKET_REGION_KEY) + ":" + inputProperties.getProperty(TRUSTSTORE_S3_BUCKET_KEY) + "/" + inputProperties.getProperty(TRUSTSTORE_S3_PATH_KEY) + "}'," +
             "  'properties.ssl.keystore.type' = 'PKCS12'," +
             "  'properties.ssl.keystore.location' = '${s3import:" + inputProperties.getProperty(S3_BUCKET_REGION_KEY) + ":" + inputProperties.getProperty(KEYSTORE_S3_BUCKET_KEY) + "/" + inputProperties.getProperty(KEYSTORE_S3_PATH_KEY) + "}'," +
             "  'properties.ssl.keystore.password' = '${secretsmanager:" + inputProperties.getProperty(KEYSTORE_PASS_SECRET_KEY) + ":" + inputProperties.getProperty(KEYSTORE_PASS_SECRET_FIELD_KEY) + "}'," +
             "  'properties.ssl.key.password' = '${secretsmanager:" + inputProperties.getProperty(KEYSTORE_PASS_SECRET_KEY) + ":" + inputProperties.getProperty(KEYSTORE_PASS_SECRET_FIELD_KEY) + "}'," +
             "  'scan.startup.mode' = 'earliest-offset'," +
-            "  'format' = 'json'" +
+            "  'format' = 'json'," +
+            "  'json.ignore-parse-errors' = 'true'" +
             ")"
         );
-
-        Table sourceTable = tableEnv.from("sourceTable");
 
         Properties outputProperties = applicationProperties.get("Output0");
 
@@ -103,19 +100,30 @@ public class StreamingJob {
             "CREATE TABLE sinkTable (" +
             "  `user` STRING, " +
             "  `message` STRING, " +
-            "  `ts` TIMESTAMP(3)" +
+            "  `ts` TIMESTAMP(3) " +
             ") WITH (" +
             "  'connector' = 'kafka'," +
             "  'topic' = '" + outputProperties.getProperty(KAFKA_SINK_TOPIC_KEY, DEFAULT_SINK_TOPIC) + "'," +
             "  'properties.bootstrap.servers' = '" + outputProperties.getProperty(SINK_MSKBOOTSTRAP_SERVERS_KEY) + "'," +
-            "  'format' = 'json'" +
+            "  'properties.group.id' = '" + outputProperties.getProperty(KAFKA_CONSUMER_GROUP_ID_KEY, DEFAULT_CONSUMER_GROUP) + "'," +
+            "  'properties.security.protocol' = 'SSL'," +
+            "  'properties.config.providers' = 'secretsmanager,s3import'," +
+            "  'properties.config.providers.secretsmanager.class' = 'com.amazonaws.kafka.config.providers.SecretsManagerConfigProvider'," +
+            "  'properties.config.providers.s3import.class' = 'com.amazonaws.kafka.config.providers.S3ImportConfigProvider'," +
+            "  'properties.config.providers.s3import.param.region' = '" + outputProperties.getProperty(S3_BUCKET_REGION_KEY) + "'," +
+            "  'properties.ssl.keystore.type' = 'PKCS12'," +
+            "  'properties.ssl.keystore.location' = '${s3import:" + outputProperties.getProperty(S3_BUCKET_REGION_KEY) + ":" + outputProperties.getProperty(KEYSTORE_S3_BUCKET_KEY) + "/" + outputProperties.getProperty(KEYSTORE_S3_PATH_KEY) + "}'," +
+            "  'properties.ssl.keystore.password' = '${secretsmanager:" + outputProperties.getProperty(KEYSTORE_PASS_SECRET_KEY) + ":" + outputProperties.getProperty(KEYSTORE_PASS_SECRET_FIELD_KEY) + "}'," +
+            "  'properties.ssl.key.password' = '${secretsmanager:" + outputProperties.getProperty(KEYSTORE_PASS_SECRET_KEY) + ":" + outputProperties.getProperty(KEYSTORE_PASS_SECRET_FIELD_KEY) + "}'," +
+            "  'format' = 'json'," +
+            "  'json.ignore-parse-errors' = 'true'" +
             ")"
         );
 
-        Table resultTable = sourceTable.select($("user"), $("message"), $("ts"));
-        // Insert the result into the sink table
-        resultTable.executeInsert("sinkTable");
+        Table resultTable = tableEnv.from("sourceTable").select($("user"), $("message"), $("ts"));
 
-       // env.execute("Flink Kafka Source from MSK using mTLS");
+        // Emit the Table API result Table to sink table
+        TableResult result = resultTable.insertInto("sinkTable").execute();
+        LOG.info("Job status through TableResult: ", result.getJobClient().get().getJobStatus());
     }
 }
